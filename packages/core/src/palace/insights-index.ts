@@ -44,7 +44,22 @@ export function readInsightsIndex(): InsightsIndex {
     return { version: "1.0.0", updated: new Date().toISOString(), insights: [] };
   }
   try {
-    return JSON.parse(fs.readFileSync(p, "utf-8"));
+    const index: InsightsIndex = JSON.parse(fs.readFileSync(p, "utf-8"));
+    if (index && Array.isArray(index.insights)) {
+      let changed = false;
+      for (const insight of index.insights) {
+        if (!insight.projects || !Array.isArray(insight.projects)) {
+          insight.projects = [];
+          changed = true;
+        }
+      }
+      if (changed) {
+        try {
+          fs.writeFileSync(p, JSON.stringify(index, null, 2), "utf-8");
+        } catch {}
+      }
+    }
+    return index;
   } catch {
     return { version: "1.0.0", updated: new Date().toISOString(), insights: [] };
   }
@@ -98,6 +113,7 @@ export function addIndexedInsight(insight: Omit<IndexedInsight, "id" | "confirme
   const newInsight: IndexedInsight = {
     id: `idx-${Date.now()}`,
     ...insight,
+    projects: insight.projects ?? [],
     confirmed_count: 1,
     last_confirmed: now,
   };

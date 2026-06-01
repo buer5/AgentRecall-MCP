@@ -1,6 +1,6 @@
-import { journalWrite } from '../journal';
-import { palaceWrite } from '../palace';
-import { awarenessUpdate } from '../awareness';
+import { journalWrite } from "./journal-write.js";
+import { palaceWrite } from "./palace-write.js";
+import { awarenessUpdate } from "./awareness-update.js";
 
 // 动态生成当前的记忆结构大纲给大模型看
 export async function getMemoryMap() {
@@ -18,13 +18,22 @@ export async function executeStoreMemory(targetPath: string, content: string): P
   if (path.startsWith('/palace/')) {
     // 提取房间名，例如从 "/palace/architecture" 提取 "architecture"
     const room = path.replace('/palace/', '') || 'general';
-    return palaceWrite(room, content);
+    await palaceWrite({ room, content });
+    return;
   } 
   
   if (path === '/awareness') {
-    return awarenessUpdate([{ title: 'Auto-Insight', content }]);
+    await awarenessUpdate({
+      insights: [{
+        title: 'Auto-Insight',
+        evidence: content,
+        applies_when: ['auto'],
+        source: 'memory-map'
+      }]
+    });
+    return;
   }
 
   // 兜底全进 Journal
-  return journalWrite(content);
+  await journalWrite({ content });
 }

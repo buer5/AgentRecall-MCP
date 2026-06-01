@@ -64,7 +64,7 @@ export async function awarenessUpdate(input: AwarenessUpdateInput): Promise<Awar
       title: insight.title,
       source: insight.source,
       applies_when: insight.applies_when,
-      projects: input.project ? [input.project] : undefined,
+      projects: input.project ? [input.project] : (insight.source_project ? [insight.source_project] : ["_global"]),
       file: undefined,
       severity: insight.severity ?? "important",
     });
