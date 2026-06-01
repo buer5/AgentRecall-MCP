@@ -1,0 +1,13 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.DS_Store
+.superpowers/
+
+# Claude worktrees
+.claude/
+
+# Stray src copies
+/src/
+supabase/.temp/
+.superpowers/
