@@ -76,6 +76,26 @@ describe("Smart routing — smartRemember", () => {
     assert.ok("classification" in result);
     assert.ok(result.auto_name.length > 0);
   });
+
+  it("filters PII and credentials in smartRemember", async () => {
+    const result = await core.smartRemember({
+      content: "Important: OpenAI API key sk-proj-1234567890abcdef1234567890abcdef and Slack token xoxb-1234567890-abcdef123456 must be kept secure. Also email support@novada.com and generic password: 'supersecretpassword123' must not leak.",
+      project: "test-routing",
+    });
+    assert.equal(result.success, true);
+    
+    // Read the written file to check if it has been redacted
+    const writtenFilePath = result.file_path.replace("~/.agent-recall", TEST_ROOT_REMEMBER);
+    const content = fs.readFileSync(writtenFilePath, "utf-8");
+    assert.ok(!content.includes("sk-proj-"));
+    assert.ok(!content.includes("xoxb-"));
+    assert.ok(!content.includes("supersecretpassword123"));
+    assert.ok(!content.includes("support@novada.com"));
+    assert.ok(content.includes("[REDACTED_API_KEY]"));
+    assert.ok(content.includes("[REDACTED_SLACK_TOKEN]"));
+    assert.ok(content.includes("[REDACTED_SECRET]"));
+    assert.ok(content.includes("[REDACTED_EMAIL]"));
+  });
 });
 
 describe("Smart routing — smartRecall", () => {

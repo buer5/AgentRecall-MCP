@@ -123,11 +123,46 @@ function classifyRoute(content: string, context?: string): Route {
 }
 
 // ---------------------------------------------------------------------------
+// PII & Credential Sanitizer
+// ---------------------------------------------------------------------------
+
+export function sanitizePIIAndCredentials(text: string): string {
+  if (!text) return text;
+  let sanitized = text;
+
+  // 1. OpenAI / Anthropic / Voyage API Keys
+  sanitized = sanitized.replace(/\bsk-[a-zA-Z0-9_-]{30,}\b/g, "[REDACTED_API_KEY]");
+  sanitized = sanitized.replace(/\bsk-proj-[a-zA-Z0-9_-]{30,}\b/g, "[REDACTED_API_KEY]");
+  sanitized = sanitized.replace(/\bant-[a-zA-Z0-9_-]{30,}\b/g, "[REDACTED_API_KEY]");
+  sanitized = sanitized.replace(/\bvy-[a-zA-Z0-9_-]{30,}\b/g, "[REDACTED_API_KEY]");
+  
+  // 2. Slack tokens
+  sanitized = sanitized.replace(/\bxox[bapr]-[0-9a-zA-Z_-]{10,}\b/g, "[REDACTED_SLACK_TOKEN]");
+
+  // 3. Generic Secrets & Tokens in key-value format
+  sanitized = sanitized.replace(
+    /\b(password|pass|secret|token|key|pwd|auth_token)\s*[:=]\s*["']?[a-zA-Z0-9\-._~+/]{8,}(?=["']?|\b)/gi,
+    "$1: [REDACTED_SECRET]"
+  );
+
+  // 4. Bearer Tokens in headers
+  sanitized = sanitized.replace(/\bBearer\s+[a-zA-Z0-9\-._~+/]+=*/gi, "Bearer [REDACTED_BEARER_TOKEN]");
+
+  // 5. Emails (PII)
+  sanitized = sanitized.replace(/\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b/g, "[REDACTED_EMAIL]");
+
+  return sanitized;
+}
+
+// ---------------------------------------------------------------------------
 // Dispatch
 // ---------------------------------------------------------------------------
 
 export async function smartRemember(input: SmartRememberInput): Promise<SmartRememberResult> {
-  if (!input.content || input.content.trim().length < 5) {
+  const content = sanitizePIIAndCredentials(input.content || "");
+  const context = input.context ? sanitizePIIAndCredentials(input.context) : undefined;
+
+  if (!content || content.trim().length < 5) {
     return {
       success: false,
       routed_to: "rejected",
@@ -137,8 +172,8 @@ export async function smartRemember(input: SmartRememberInput): Promise<SmartRem
     };
   }
 
-  const route = classifyRoute(input.content, input.context);
-  const slugResult = generateSlug(input.content);
+  const route = classifyRoute(content, context);
+  const slugResult = generateSlug(content);
   const autoName = slugResult.slug;
 
   // Conflict scan: compare new content against existing memories BEFORE saving.
@@ -146,7 +181,7 @@ export async function smartRemember(input: SmartRememberInput): Promise<SmartRem
   // Never blocks save — wrapped in try/catch.
   let conflict_warning: string | undefined;
   try {
-    const conflictResult = await scanForConflicts(input.content, input.project);
+    const conflictResult = await scanForConflicts(content, input.project);
     if (conflictResult.hasConflict && conflictResult.matches.length > 0) {
       conflict_warning = formatConflictWarning(conflictResult.matches, input.project);
     }
@@ -160,19 +195,19 @@ export async function smartRemember(input: SmartRememberInput): Promise<SmartRem
     case "journal_capture": {
       result = await journalCapture({
         question: "Auto-captured",
-        answer: input.content,
+        answer: content,
         project: input.project,
       });
       break;
     }
     case "palace_write": {
       // Use content type as room. When "general", pick a better room from context hint or tags.
-      const contentType = detectContentType(input.content);
+      const contentType = detectContentType(content);
       let room = contentType === "general" ? "knowledge" : contentType;
 
       // Smarter room routing based on context hint
-      if (input.context) {
-        const ctxLower = input.context.toLowerCase();
+      if (context) {
+        const ctxLower = context.toLowerCase();
         if (/design|color|theme|style|ui|ux|layout|font/i.test(ctxLower)) room = "design";
         else if (/architecture|tech.?stack|system|infra/i.test(ctxLower)) room = "architecture";
         else if (/decision|chose|picked|going.?with/i.test(ctxLower)) room = "decision";
@@ -181,10 +216,10 @@ export async function smartRemember(input: SmartRememberInput): Promise<SmartRem
         else if (/blocker|blocked|stuck|waiting/i.test(ctxLower)) room = "blockers";
       }
 
-      const tags = generateTags(input.content, contentType !== "general" ? contentType : undefined);
+      const tags = generateTags(content, contentType !== "general" ? contentType : undefined);
       result = await palaceWrite({
         room,
-        content: input.content,
+        content: content,
         project: input.project,
         auto_name: true,
         tags,
@@ -193,11 +228,11 @@ export async function smartRemember(input: SmartRememberInput): Promise<SmartRem
     }
     case "knowledge_write": {
       // Extract title from first sentence or first line
-      const firstLine = input.content.split(/[.\n]/)[0]?.trim() ?? "Auto-captured lesson";
+      const firstLine = content.split(/[.\n]/)[0]?.trim() ?? "Auto-captured lesson";
       result = await knowledgeWrite({
         category: slugResult.contentType,
         title: firstLine.slice(0, 80),
-        what_happened: input.content,
+        what_happened: content,
         root_cause: "See content",
         fix: "See content",
         project: input.project,
@@ -206,12 +241,12 @@ export async function smartRemember(input: SmartRememberInput): Promise<SmartRem
     }
     case "awareness_update": {
       // Extract title from first sentence
-      const title = input.content.split(/[.\n]/)[0]?.trim().slice(0, 80) ?? "Auto-captured insight";
+      const title = content.split(/[.\n]/)[0]?.trim().slice(0, 80) ?? "Auto-captured insight";
       result = await awarenessUpdate({
         insights: [
           {
             title,
-            evidence: input.content,
+            evidence: content,
             applies_when: slugResult.keywords,
             source: `smart_remember ${new Date().toISOString().slice(0, 10)}`,
             source_project: input.project,
@@ -226,7 +261,7 @@ export async function smartRemember(input: SmartRememberInput): Promise<SmartRem
   // Consistency check: find contradictions with existing memories
   let consistency_warnings: ConsistencyWarning[] | undefined;
   try {
-    const check = await consistencyCheck(input.content, input.project);
+    const check = await consistencyCheck(content, input.project);
     if (check.warnings.length > 0) {
       consistency_warnings = check.warnings;
     }
@@ -274,7 +309,7 @@ export async function smartRemember(input: SmartRememberInput): Promise<SmartRem
     : undefined;
 
   // Get tags from the routed result
-  const tags = generateTags(input.content, slugResult.contentType !== "general" ? slugResult.contentType : undefined);
+  const tags = generateTags(content, slugResult.contentType !== "general" ? slugResult.contentType : undefined);
 
   // Associative linking — best-effort, never awaited in critical path
   if (
@@ -289,7 +324,7 @@ export async function smartRemember(input: SmartRememberInput): Promise<SmartRem
         ? `${resultObj.room}/${resultObj.topic}`
         : autoName;
     const { linkToSimilar } = await import("../helpers/associative-link.js");
-    linkToSimilar(input.project, input.content, savedSlug).catch(() => {});
+    linkToSimilar(input.project, content, savedSlug).catch(() => {});
   }
 
   // Fire-and-forget vector indexing — never blocks the save path.
@@ -305,10 +340,10 @@ export async function smartRemember(input: SmartRememberInput): Promise<SmartRem
       route === "awareness_update" ? "insight"
       : route === "journal_capture" ? "journal"
       : "palace";
-    const vectorExcerpt = input.content.slice(0, 300);
+    const vectorExcerpt = content.slice(0, 300);
     import("./smart-remember-vector.js")
       .then(({ indexRemembered }) =>
-        indexRemembered(input.project!, itemId, vectorSource, autoName, vectorExcerpt, input.content)
+        indexRemembered(input.project!, itemId, vectorSource, autoName, vectorExcerpt, content)
       )
       .catch(() => {});
   }
