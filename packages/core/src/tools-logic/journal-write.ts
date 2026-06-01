@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { resolveProject } from "../storage/project.js";
 import { journalDir, palaceDir, sanitizeSlug } from "../storage/paths.js";
-import { ensureDir, todayISO } from "../storage/fs-utils.js";
+import { ensureDir, todayISO, writeFileSyncAtomic } from "../storage/fs-utils.js";
 import { appendToSection } from "../helpers/sections.js";
 import { updateIndex } from "../helpers/journal-files.js";
 import { ensurePalaceInitialized, roomExists, createRoom } from "../palace/rooms.js";
@@ -101,7 +101,7 @@ export async function journalWrite(input: JournalWriteInput): Promise<JournalWri
 
   const sectionArg = input.section ?? null;
   const updated = appendToSection(existing, input.content, sectionArg);
-  fs.writeFileSync(filePath, updated, "utf-8");
+  writeFileSyncAtomic(filePath, updated, "utf-8");
   updateIndex(slug);
 
   let palaceResult: JournalWriteResult["palace"] = null;
@@ -120,12 +120,14 @@ export async function journalWrite(input: JournalWriteInput): Promise<JournalWri
     const timestamp = new Date().toISOString();
     const entry = `\n### ${date} (from journal)\n\n${input.content}\n`;
 
+    let targetContent = "";
     if (fs.existsSync(targetPath)) {
-      fs.appendFileSync(targetPath, entry, "utf-8");
+      targetContent = fs.readFileSync(targetPath, "utf-8") + entry;
     } else {
       const fm = generateFrontmatter({ room: input.palace_room, topic: topicFile, created: timestamp, source: "journal_write" });
-      fs.writeFileSync(targetPath, `${fm}# ${input.palace_room} / ${topicFile}\n${entry}`, "utf-8");
+      targetContent = `${fm}# ${input.palace_room} / ${topicFile}\n${entry}`;
     }
+    writeFileSyncAtomic(targetPath, targetContent, "utf-8");
 
     const fanOutResult = fanOut(slug, input.palace_room, topicFile, input.content, [], "medium");
     updatePalaceIndex(slug);

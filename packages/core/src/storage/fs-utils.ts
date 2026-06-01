@@ -30,3 +30,10 @@ export function writeJsonAtomic(filePath: string, data: unknown): void {
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf-8");
   fs.renameSync(tmp, filePath); // atomic on POSIX
 }
+
+export function writeFileSyncAtomic(filePath: string, content: string, encoding: BufferEncoding = "utf-8"): void {
+  ensureDir(path.dirname(filePath));
+  const tmp = filePath + ".tmp." + process.pid + "." + Math.random().toString(36).slice(2);
+  fs.writeFileSync(tmp, content, encoding);
+  fs.renameSync(tmp, filePath);
+}

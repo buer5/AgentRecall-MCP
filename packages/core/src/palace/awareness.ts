@@ -18,7 +18,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { getRoot } from "../types.js";
-import { ensureDir } from "../storage/fs-utils.js";
+import { ensureDir, writeJsonAtomic } from "../storage/fs-utils.js";
 import { extractKeywords } from "../helpers/auto-name.js";
 import { withLock } from "../storage/filelock.js";
 import { syncToSupabase } from "../supabase/sync.js";
@@ -170,9 +170,7 @@ export function readAwarenessArchive(): Insight[] {
 
 export function writeAwarenessArchive(archive: Insight[]): void {
   const p = AWARENESS_ARCHIVE_PATH();
-  ensureDir(path.dirname(p));
-  // Keep newest first, cap at MAX_ARCHIVE
-  fs.writeFileSync(p, JSON.stringify(archive.slice(0, MAX_ARCHIVE), null, 2), "utf-8");
+  writeJsonAtomic(p, archive.slice(0, MAX_ARCHIVE));
 }
 
 /** Archive a demoted insight. If a matching insight exists in archive, strengthen it. */
